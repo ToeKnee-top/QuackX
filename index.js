@@ -6,8 +6,9 @@ const fetch = require("node-fetch");
 const cheerio = require("cheerio");
 const DEVLOG_CHANNEL = "C01504DCLVD"; // your target channel
 const cooldown = new Map();
-const defaultLocalModelUrl = "http://127.0.0.1:11434/v1/chat/completions";
+const defaultLocalModelUrl = "http://127.0.0.1:11434/api/chat";
 const localModelUrl = process.env.LOCAL_MODEL_URL || defaultLocalModelUrl;
+const defaultLocalModelName = process.env.LOCAL_MODEL_NAME || "llama3.2";
 const requiredEnv = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"];
 const missingEnv = requiredEnv.filter((key) => !process.env[key]);
 if (missingEnv.length > 0) {
@@ -65,14 +66,17 @@ app.command("/quackx-joke", async ({ ack, respond }) => {
     await respond({ text: "Failed to fetch a joke." });
   }
 });
-app.command("/quackx-news", async ({ ack, respond }) => {
+app.command("/quackx-news", async ({ command, ack, respond }) => {
   await ack();
   try {
-    const topic = command.text || "technology";
+    if (!process.env.NEWS_API_KEY) {
+      return respond("News is unavailable because the News API key is not configured.");
+    }
 
-    const url = `https://newsapi.org/v2/top-headlines?country=us&category=${topic}&apiKey=${process.env.NEWS_API_KEY}`;
+    const topic = (command.text || "technology").trim().toLowerCase() || "technology";
+    const url = `https://newsapi.org/v2/top-headlines?country=us&category=${encodeURIComponent(topic)}&apiKey=${process.env.NEWS_API_KEY}`;
 
-    const { data } = await axios.get(url);
+    const { data } = await axios.get(url, { timeout: 10000 });
 
     if (!data.articles || data.articles.length === 0) {
       return respond(`No news found for topic: *${topic}*`);
@@ -84,17 +88,21 @@ app.command("/quackx-news", async ({ ack, respond }) => {
       .map((a, i) => `*${i + 1}. ${a.title}*\n${a.url}`)
       .join("\n\n");
 
-    respond(`📰 *Top News for:* _${topic}_\n\n${formatted}`);
+    await respond(`📰 *Top News for:* _${topic}_\n\n${formatted}`);
   } catch (err) {
     console.error(err);
-    respond("Sorry, I couldn't fetch the news right now.");
+    await respond("Sorry, I couldn't fetch the news right now.");
   }
 });
 app.command("/quackx-weather", async ({ command, ack, respond }) => {
   await ack();
 
   try {
-    const city = command.text.trim();
+    if (!process.env.WEATHER_API_KEY) {
+      return respond("Weather is unavailable because the OpenWeather API key is not configured.");
+    }
+
+    const city = (command.text || "").trim();
 
     if (!city) {
       return respond("Please provide a city name, like:\n`/quackx-weather Houston`");
@@ -104,14 +112,14 @@ app.command("/quackx-weather", async ({ command, ack, respond }) => {
       city
     )}&units=imperial&appid=${process.env.WEATHER_API_KEY}`;
 
-    const { data } = await axios.get(url);
+    const { data } = await axios.get(url, { timeout: 10000 });
 
-    const desc = data.weather[0].description;
-    const temp = data.main.temp;
-    const feels = data.main.feels_like;
-    const humidity = data.main.humidity;
+    const desc = data.weather?.[0]?.description || "unknown";
+    const temp = data.main?.temp ?? "n/a";
+    const feels = data.main?.feels_like ?? "n/a";
+    const humidity = data.main?.humidity ?? "n/a";
 
-    respond(
+    await respond(
       `🌤️ *Weather for ${city}:*\n` +
       `• Condition: ${desc}\n` +
       `• Temperature: ${temp}°F\n` +
@@ -120,7 +128,7 @@ app.command("/quackx-weather", async ({ command, ack, respond }) => {
     );
   } catch (err) {
     console.error(err);
-    respond(
+    await respond(
       "I couldn't fetch the weather. Make sure the city name is valid, like:\n" +
       "`/quackx-weather New York`"
     );
@@ -135,14 +143,23 @@ app.command("/quackx-chat", async ({ command, ack, respond }) => {
   ];
 
   try {
-    const response = await axios.post(localModelUrl, { model: "gemma4", messages });
-    const content = response.data?.choices?.[0]?.message?.content;
+    const response = await axios.post(
+      localModelUrl,
+      {
+        model: defaultLocalModelName,
+        messages,
+        stream: false,
+      },
+      { timeout: 15000 }
+    );
+
+    const content = response.data?.choices?.[0]?.message?.content || response.data?.message?.content || response.data?.response;
     if (!content) throw new Error("No content returned from the model.");
     await respond({ text: content });
   } catch (err) {
     console.error("chat error", err?.response?.data || err.message || err);
     await respond({
-      text: "Sorry, I couldn't get a response from the local model. Make sure Ollama is running and LOCAL_MODEL_URL is set correctly.",
+      text: "Sorry, I couldn't get a response from the local model. Make sure Ollama is running and LOCAL_MODEL_URL / LOCAL_MODEL_NAME are set correctly.",
     });
   }
 });
@@ -258,7 +275,7 @@ function parseQuack(text) {
 }
 
 // ─── Main Listener ──────────────────────────────────────
-app.message (async ({ message, client })) => {
+app.message(async ({ message, client }) => {
   if (!message.text || message.subtype === 'bot_message') return;
 
 //profanity checker
@@ -267,15 +284,16 @@ const badWords = ['fuck', 'shit', 'bitch', 'ass', 'retard']; // keep this simple
 
   if (!message.text) return;
 
-  const text = message.text.toLowerCase();
+  const loweredText = message.text.toLowerCase();
 
-  const found = badWords.find(word => text.includes(word));
+  const found = badWords.find(word => loweredText.includes(word));
 
   if (found) {
     // DM user instead of public callout
     await client.chat.postMessage({
       channel: message.user,
-      text: `hey, 👀 just a heads up—try to avoid that word here. It would be greatly appreciated by the community.👌`
+      text: `hey, 👀 just a heads up—try to avoid that word here. It would be greatly appreciated by the community.👌
+      👉 https://hackclub.com/conduct`
     });
   }
 
@@ -284,11 +302,11 @@ const badWords = ['fuck', 'shit', 'bitch', 'ass', 'retard']; // keep this simple
 // user: "quack @user hello"
 
 
-  const text = message.text;
+  const messageText = message.text;
 
-  if (!text.startsWith('quack')) return;
+  if (!messageText.startsWith('quack')) return;
 
-  const match = text.match(/quack <@(\w+)> (.+)/);
+  const match = messageText.match(/quack <@(\w+)> (.+)/);
   if (!match) return;
 
   const targetUser = match[1];
@@ -299,7 +317,8 @@ const badWords = ['fuck', 'shit', 'bitch', 'ass', 'retard']; // keep this simple
 
   await client.chat.postMessage({
     channel: targetUser,
-    text: `🦆 You got quacked!\nFrom: <@${sender}>\nTime: ${time}\nMessage: ${msg}`
+    text: `🦆 You got quacked!\nFrom: <@${sender}>\nTime: ${time}\nMessage: ${msg}
+    Continue the relay! type quack @someone message to continue the relay!`
   });
 
 //scrapbook sending
@@ -321,7 +340,7 @@ const badWords = ['fuck', 'shit', 'bitch', 'ass', 'retard']; // keep this simple
   } catch (err) {
     console.error("Devlog error:", err);
   }
-}
+});
 //end
 (async () => {
   await app.start();
