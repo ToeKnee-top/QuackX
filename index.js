@@ -7,11 +7,12 @@ const cheerio = require("cheerio");
 
 const DEVLOG_CHANNEL = process.env.DEVLOG_CHANNEL || "C01504DCLVD";
 const cooldown = new Map();
-const defaultLocalModelUrl = "http://127.0.0.1:11434/v1/chat/completions";
-const localModelUrl = process.env.LOCAL_MODEL_URL || defaultLocalModelUrl;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
 const requiredEnv = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"];
 const missingEnv = requiredEnv.filter((key) => !process.env[key]);
+if (!OPENAI_API_KEY) missingEnv.push("OPENAI_API_KEY");
 if (missingEnv.length > 0) {
   console.error("Missing required environment variables:", missingEnv.join(", "));
   process.exit(1);
@@ -23,7 +24,7 @@ const app = new App({
   socketMode: true,
 });
 
-console.log("Using local model endpoint:", localModelUrl);
+console.log("Using OpenAI model:", OPENAI_MODEL);
 
 // ─── Slash Commands ─────────────────────────────────────
 
@@ -45,7 +46,7 @@ app.command("/quackx-help", async ({ ack, respond }) => {
 /quackx-joke — get a joke
 /quackx-catfact — get a cat fact
 /quackx-ping — check bot latency
-/quackx-chat — chat with the local model (e.g. /quackx-chat Hi)
+/quackx-chat — chat with the AI (e.g. /quackx-chat Hi)
 /quackx-news — latest news by topic (e.g. /quackx-news technology)
 /quackx-weather — weather for a city (e.g. /quackx-weather Houston)
 /quackx-help — show this help message`,
@@ -128,20 +129,35 @@ app.command("/quackx-weather", async ({ command, ack, respond }) => {
 app.command("/quackx-chat", async ({ command, ack, respond }) => {
   await ack();
   const userContent = (command.text || "Hi. Can you update me on news and weather?").trim();
-  const messages = [
-    { role: "system", content: "You are a helpful AI assistant for Slack, specifically, the Hackclub community." },
-    { role: "user", content: userContent },
-  ];
+
+  if (!OPENAI_API_KEY) {
+    return await respond("OPENAI_API_KEY is not set. Add it to your .env file.");
+  }
 
   try {
-    const response = await axios.post(localModelUrl, { model: "gemma4", messages });
-    const content = response.data?.choices?.[0]?.message?.content;
-    if (!content) throw new Error("No content returned from the model.");
-    await respond({ text: content });
+    const response = await axios.post(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model: OPENAI_MODEL,
+        messages: [
+          { role: "system", content: "You are a helpful AI assistant for Slack, specifically, the Hackclub community." },
+          { role: "user", content: userContent },
+        ],
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    const reply = response.data?.choices?.[0]?.message?.content;
+    if (!reply) throw new Error("No content returned from OpenAI.");
+    await respond({ text: reply });
   } catch (err) {
     console.error("chat error", err?.response?.data || err.message || err);
     await respond({
-      text: "Sorry, I couldn't get a response from the local model. Make sure Ollama is running and LOCAL_MODEL_URL is set correctly.",
+      text: "Sorry, I couldn't get a response from OpenAI. Check your OPENAI_API_KEY and billing status.",
     });
   }
 });
@@ -159,7 +175,11 @@ function canPost(user) {
 
 function extractStardanceLink(text) {
   const match = text.match(/https?:\/\/stardance\.hackclub\.com\/[^\s]+/);
-  return match ? match[0] : null;
+  if (!match) return null;
+  let url = match[0];
+  // Strip trailing Slack formatting chars
+  url = url.replace(/[>\)|]+$/, '');
+  return url;
 }
 
 async function fetchDevlog(url) {
