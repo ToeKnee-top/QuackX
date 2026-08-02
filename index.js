@@ -263,22 +263,25 @@ function formatDevlogBlocks(user, url, devlog, parsed) {
 
 // ─── Main Message Listener ──────────────────────────────
 
-const badWords = ["fuck", "shit", "bitch", "ass", "retard"];
+const badWords = ["fuck", "shit", "bitch", "ass", "retard", "dumb", "dumbass"];
 
 app.message(async ({ message, client }) => {
   if (!message.text || message.subtype === "bot_message") return;
 
-  const text = message.text;
-  const lowerText = text.toLowerCase();
+  const text = message.text.toLowerCase();
   const sender = message.user;
 
   // ── Profanity Filter ───────────────────────────
-  const found = badWords.find((word) => lowerText.includes(word));
-  if (found) {
+  const matches = [...text.matchAll(/\b(fuck|shit|bitch|ass|retard|dumb|dumbass)\b/g)];
+  if (matches.length > 0) {
     try {
+      const curses = [];
+      matches.forEach((arr) => {
+        curses.push(arr[0]);
+      })
       await client.chat.postMessage({
         channel: sender,
-        text: "hey, 👀 just a heads up—try to avoid that word here. It would be greatly appreciated by the community.👌",
+        text: `hey, 👀 just a heads up—try to avoid that word here, specifically, ${curses}. It would be greatly appreciated by the community.👌`,
       });
     } catch (err) {
       console.error("profanity dm error:", err.message);
