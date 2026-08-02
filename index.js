@@ -4,13 +4,16 @@ const { App } = require("@slack/bolt");
 const axios = require("axios");
 const fetch = require("node-fetch");
 const cheerio = require("cheerio");
-const DEVLOG_CHANNEL = "C01504DCLVD"; // your target channel
+
+const DEVLOG_CHANNEL = process.env.DEVLOG_CHANNEL || "C01504DCLVD";
 const cooldown = new Map();
-const defaultLocalModelUrl = "http://127.0.0.1:11434/api/chat";
-const localModelUrl = process.env.LOCAL_MODEL_URL || defaultLocalModelUrl;
-const defaultLocalModelName = process.env.LOCAL_MODEL_NAME || "llama3.2";
+const AI_API_KEY = process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY;
+const AI_MODEL = process.env.AI_MODEL || "llama3-8b-8192";
+const AI_BASE_URL = process.env.AI_BASE_URL || "https://api.groq.com/openai/v1";
+
 const requiredEnv = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"];
 const missingEnv = requiredEnv.filter((key) => !process.env[key]);
+if (!AI_API_KEY) missingEnv.push("GROQ_API_KEY (or OPENAI_API_KEY)");
 if (missingEnv.length > 0) {
   console.error("Missing required environment variables:", missingEnv.join(", "));
   process.exit(1);
@@ -22,7 +25,9 @@ const app = new App({
   socketMode: true,
 });
 
-console.log("Using local model endpoint:", localModelUrl);
+console.log("Using AI model:", AI_MODEL, "at", AI_BASE_URL);
+
+// ─── Slash Commands ─────────────────────────────────────
 
 app.command("/quackx-catfact", async ({ ack, respond }) => {
   await ack();
@@ -39,17 +44,17 @@ app.command("/quackx-help", async ({ ack, respond }) => {
   await ack();
   await respond({
     text: `Available Commands:
-    \n/quackx-joke - get a joke
-    \n/quackx-catfact - Get a cat fact
-    \n/quackx-ping - Check bot latency
-    \n/quackx-chat - Use /quackx-chat followed by your message to chat with the local model (e.g., /quackx-chat Hi. Can you help me with my project?)
-    \n/quackx-news - Get the latest news with /quackx-news followed by a topic (e.g., /quackx-news technology)
-    \n/quackx-weather - Get the weather for any city with /quackx-weather followed by the city name (e.g., /quackx-weather Houston)
-    \n/quackx-help - Show this help message`,
+/quackx-joke — get a joke
+/quackx-catfact — get a cat fact
+/quackx-ping — check bot latency
+/quackx-chat — chat with AI (free via Groq, e.g. /quackx-chat Hi)
+/quackx-news — latest news by topic (e.g. /quackx-news technology)
+/quackx-weather — weather for a city (e.g. /quackx-weather Houston)
+/quackx-help — show this help message`,
   });
 });
 
-app.command("/quackx-ping", async ({ command, ack, respond }) => {
+app.command("/quackx-ping", async ({ ack, respond }) => {
   const start = Date.now();
   await ack();
   const latency = Date.now() - start;
@@ -66,58 +71,45 @@ app.command("/quackx-joke", async ({ ack, respond }) => {
     await respond({ text: "Failed to fetch a joke." });
   }
 });
+
 app.command("/quackx-news", async ({ command, ack, respond }) => {
   await ack();
   try {
-    if (!process.env.NEWS_API_KEY) {
-      return respond("News is unavailable because the News API key is not configured.");
-    }
-
-    const topic = (command.text || "technology").trim().toLowerCase() || "technology";
+    const topic = command.text || "technology";
     const url = `https://newsapi.org/v2/top-headlines?country=us&category=${encodeURIComponent(topic)}&apiKey=${process.env.NEWS_API_KEY}`;
-
-    const { data } = await axios.get(url, { timeout: 10000 });
+    const { data } = await axios.get(url);
 
     if (!data.articles || data.articles.length === 0) {
-      return respond(`No news found for topic: *${topic}*`);
+      return await respond(`No news found for topic: *${topic}*`);
     }
 
     const top = data.articles.slice(0, 5);
-
     const formatted = top
       .map((a, i) => `*${i + 1}. ${a.title}*\n${a.url}`)
       .join("\n\n");
 
     await respond(`📰 *Top News for:* _${topic}_\n\n${formatted}`);
   } catch (err) {
-    console.error(err);
+    console.error("news error", err);
     await respond("Sorry, I couldn't fetch the news right now.");
   }
 });
+
 app.command("/quackx-weather", async ({ command, ack, respond }) => {
   await ack();
-
   try {
-    if (!process.env.WEATHER_API_KEY) {
-      return respond("Weather is unavailable because the OpenWeather API key is not configured.");
-    }
-
     const city = (command.text || "").trim();
-
     if (!city) {
-      return respond("Please provide a city name, like:\n`/quackx-weather Houston`");
+      return await respond("Please provide a city name, like:\n\`/quackx-weather Houston\`");
     }
 
-    const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(
-      city
-    )}&units=imperial&appid=${process.env.WEATHER_API_KEY}`;
+    const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&units=imperial&appid=${process.env.WEATHER_API_KEY}`;
+    const { data } = await axios.get(url);
 
-    const { data } = await axios.get(url, { timeout: 10000 });
-
-    const desc = data.weather?.[0]?.description || "unknown";
-    const temp = data.main?.temp ?? "n/a";
-    const feels = data.main?.feels_like ?? "n/a";
-    const humidity = data.main?.humidity ?? "n/a";
+    const desc = data.weather[0].description;
+    const temp = data.main.temp;
+    const feels = data.main.feels_like;
+    const humidity = data.main.humidity;
 
     await respond(
       `🌤️ *Weather for ${city}:*\n` +
@@ -127,222 +119,212 @@ app.command("/quackx-weather", async ({ command, ack, respond }) => {
       `• Humidity: ${humidity}%`
     );
   } catch (err) {
-    console.error(err);
+    console.error("weather error", err);
     await respond(
       "I couldn't fetch the weather. Make sure the city name is valid, like:\n" +
-      "`/quackx-weather New York`"
+      "\`/quackx-weather New York\`"
     );
   }
 });
+
 app.command("/quackx-chat", async ({ command, ack, respond }) => {
   await ack();
   const userContent = (command.text || "Hi. Can you update me on news and weather?").trim();
-  const messages = [
-    { role: "system", content: "You are a helpful AI assistant for Slack, specifically, the Hackclub community." },
-    { role: "user", content: userContent },
-  ];
+
+  if (!AI_API_KEY) {
+    return await respond("GROQ_API_KEY is not set. Get a free key at https://console.groq.com/keys");
+  }
 
   try {
     const response = await axios.post(
-      localModelUrl,
+      `${AI_BASE_URL}/chat/completions`,
       {
-        model: defaultLocalModelName,
-        messages,
-        stream: false,
+        model: AI_MODEL,
+        messages: [
+          { role: "system", content: "You are a helpful AI assistant for Slack, specifically, the Hackclub community." },
+          { role: "user", content: userContent },
+        ],
       },
-      { timeout: 15000 }
+      {
+        headers: {
+          Authorization: `Bearer ${AI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
     );
-
-    const content = response.data?.choices?.[0]?.message?.content || response.data?.message?.content || response.data?.response;
-    if (!content) throw new Error("No content returned from the model.");
-    await respond({ text: content });
+    const reply = response.data?.choices?.[0]?.message?.content;
+    if (!reply) throw new Error("No content returned from OpenAI.");
+    await respond({ text: reply });
   } catch (err) {
     console.error("chat error", err?.response?.data || err.message || err);
     await respond({
-      text: "Sorry, I couldn't get a response from the local model. Make sure Ollama is running and LOCAL_MODEL_URL / LOCAL_MODEL_NAME are set correctly.",
+      text: "Sorry, I couldn't get a response. Check your API key and try again.",
     });
   }
 });
-// Stuff other than commands:
-// ─── Helpers ────────────────────────────────────────────
-function canPost(user) {
-  const now = Date.now();
-  const last = cooldown.get(user) || 0;
 
-  if (now - last < 60000) return false; // 1 min cooldown
-  cooldown.set(user, now);
-  return true;
+// ─── Helpers ────────────────────────────────────────────
+
+function canPost(user) {
+  const now = Date.now();
+  const last = cooldown.get(user) || 0;
+
+  if (now - last < 60000) return false; // 1 min cooldown
+  cooldown.set(user, now);
+  return true;
 }
 
-// Extract Stardance link
 function extractStardanceLink(text) {
   const match = text.match(/https?:\/\/stardance\.hackclub\.com\/[^\s]+/);
-  return match ? match[0] : null;
+  if (!match) return null;
+  let url = match[0];
+  // Strip trailing Slack formatting chars
+  url = url.replace(/[>\)|]+$/, '');
+  return url;
 }
 
-// Fetch + parse HTML
 async function fetchDevlog(url) {
-  const res = await fetch(url);
-  const html = await res.text();
-  const $ = cheerio.load(html);
+  const res = await fetch(url);
+  const html = await res.text();
+  const $ = cheerio.load(html);
 
-  const title = $('h1').first().text().trim() || "Untitled Devlog";
+  const title = $("h1").first().text().trim() || "Untitled Devlog";
+  const content = $("p")
+    .map((i, el) => $(el).text())
+    .get()
+    .join("\n");
 
-  const content = $('p')
-    .map((i, el) => $(el).text())
-    .get()
-    .join('\n');
-
-  return { title, content };
+  return { title, content };
 }
 
-// Smart parsing
 function parseDevlog(content) {
-  const lines = content.split('\n').filter(l => l.trim());
+  const lines = content.split("\n").filter((l) => l.trim());
 
-  const progress = lines.filter(l =>
-    /built|made|added|fixed|implemented/i.test(l)
-  );
+  const progress = lines.filter((l) =>
+    /built|made|added|fixed|implemented/i.test(l)
+  );
 
-  const nextSteps = lines.filter(l =>
-    /next|todo|plan|will/i.test(l)
-  );
+  const nextSteps = lines.filter((l) =>
+    /next|todo|plan|will/i.test(l)
+  );
 
-  return {
-    summary: lines.slice(0, 3).join('\n'),
-    progress: progress.slice(0, 3),
-    nextSteps: nextSteps.slice(0, 3)
-  };
+  return {
+    summary: lines.slice(0, 3).join("\n"),
+    progress: progress.slice(0, 3),
+    nextSteps: nextSteps.slice(0, 3),
+  };
 }
 
-// Slack Blocks
 function formatDevlogBlocks(user, url, devlog, parsed) {
-  return [
-    {
-      type: "section",
-      text: { type: "mrkdwn", text: '📔*New Devlog Boosted*'}
-    },
-    {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*Author:* <@${user}>\n*Title:* ${devlog.title}`
-      }
-    },
-    {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*Summary:*\n${parsed.summary || "No summary"}`
-      }
-    },
-    {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*Progress:*\n• ${parsed.progress.join('\n• ') || "None"}`
-      }
-    },
-    {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*Next Steps:*\n• ${parsed.nextSteps.join('\n• ') || "None"}`
-      }
-    },
-    {
-      type: "actions",
-      elements: [
-        {
-          type: "button",
-          text: { type: "plain_text", text: "View Devlog" },
-          url: url
-        }
-      ]
-    }
-  ];
+  return [
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: "📔 *New Devlog Boosted*" },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*Author:* <@${user}>\n*Title:* ${devlog.title}`,
+      },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*Summary:*\n${parsed.summary || "No summary"}`,
+      },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*Progress:*\n• ${parsed.progress.join("\n• ") || "None"}`,
+      },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*Next Steps:*\n• ${parsed.nextSteps.join("\n• ") || "None"}`,
+      },
+    },
+    {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "View Devlog" },
+          url: url,
+        },
+      ],
+    },
+  ];
 }
 
-// Parse quack command
-function parseQuack(text) {
-  const match = text.match(/^quack <@(\w+)> (.+)/);
-  if (!match) return null;
+// ─── Main Message Listener ──────────────────────────────
 
-  return {
-    target: match[1],
-    message: match[2]
-  };
-}
+const badWords = ["fuck", "shit", "bitch", "ass", "retard"];
 
-// ─── Main Listener ──────────────────────────────────────
 app.message(async ({ message, client }) => {
-  if (!message.text || message.subtype === 'bot_message') return;
+  if (!message.text || message.subtype === "bot_message") return;
 
-//profanity checker
-const badWords = ['fuck', 'shit', 'bitch', 'ass', 'retard']; // keep this simple for now
+  const text = message.text;
+  const lowerText = text.toLowerCase();
+  const sender = message.user;
 
-
-  if (!message.text) return;
-
-  const loweredText = message.text.toLowerCase();
-
-  const found = badWords.find(word => loweredText.includes(word));
-
+  // ── Profanity Filter ───────────────────────────
+  const found = badWords.find((word) => lowerText.includes(word));
   if (found) {
-    // DM user instead of public callout
-    await client.chat.postMessage({
-      channel: message.user,
-      text: `hey, 👀 just a heads up—try to avoid that word here. It would be greatly appreciated by the community.👌
-      👉 https://hackclub.com/conduct`
-    });
+    try {
+      await client.chat.postMessage({
+        channel: sender,
+        text: "hey, 👀 just a heads up—try to avoid that word here. It would be greatly appreciated by the community.👌\n👉 https://hackclub.com/conduct",
+      });
+    } catch (err) {
+      console.error("profanity dm error:", err.message);
+    }
   }
 
+  // ── DM Relay (quack @user message) ─────────────
+  if (text.startsWith("quack")) {
+    const match = text.match(/^quack <@(\w+)> (.+)/);
+    if (match) {
+      const targetUser = match[1];
+      const msg = match[2];
+      const time = new Date().toLocaleString();
 
-//DM relay
-// user: "quack @user hello"
+      try {
+        await client.chat.postMessage({
+          channel: targetUser,
+          text: `🦆 You got quacked!\nFrom: <@${sender}>\nTime: ${time}\nMessage: ${msg} \n Type quack @someone message to continue the relay!`,
+        });
+      } catch (err) {
+        console.error("quack relay error:", err.message);
+      }
+    }
+  }
 
+  // ── Devlog Detection ───────────────────────────
+  const url = extractStardanceLink(text);
+  if (url && canPost(sender)) {
+    try {
+      const devlog = await fetchDevlog(url);
+      const parsed = parseDevlog(devlog.content);
 
-  const messageText = message.text;
-
-  if (!messageText.startsWith('quack')) return;
-
-  const match = messageText.match(/quack <@(\w+)> (.+)/);
-  if (!match) return;
-
-  const targetUser = match[1];
-  const msg = match[2];
-
-  const sender = message.user;
-  const time = new Date().toLocaleString();
-
-  await client.chat.postMessage({
-    channel: targetUser,
-    text: `🦆 You got quacked!\nFrom: <@${sender}>\nTime: ${time}\nMessage: ${msg}
-    Continue the relay! type quack @someone message to continue the relay!`
-  });
-
-//scrapbook sending
-// ─── 📔 Devlog Detection ────────────────────────────
-  const url = extractStardanceLink(message.text);
-  if (!url) return;
-
-  if (!canPost(message.user)) return;
-
-  try {
-    const devlog = await fetchDevlog(url);
-    const parsed = parseDevlog(devlog.content);
-
-    await client.chat.postMessage({
-      channel: DEVLOG_CHANNEL,
-      blocks: formatDevlogBlocks(message.user, url, devlog, parsed)
-    });
-
-  } catch (err) {
-    console.error("Devlog error:", err);
-  }
+      await client.chat.postMessage({
+      channel: DEVLOG_CHANNEL,
+        blocks: formatDevlogBlocks(sender, url, devlog, parsed),
+      });
+    } catch (err) {
+      console.error("Devlog error:", err);
+    }
+  }
 });
-//end
+
+// ─── Start ──────────────────────────────────────────────
+
 (async () => {
   await app.start();
-  console.log("⚡QuackX is running!");
+  console.log("⚡ QuackX is running!");
 })();
