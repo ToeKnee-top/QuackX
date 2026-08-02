@@ -281,7 +281,7 @@ app.message(async ({ message, client }) => {
       })
       await client.chat.postMessage({
         channel: sender,
-        text: `hey, 👀 just a heads up—try to avoid that word here, specifically, ${curses}. It would be greatly appreciated by the community.👌`,
+        text: `hey, 👀 just a heads up—try to avoid that word here, specifically, ${curses}. It would be greatly appreciated by the community.👌\n 👉 https://hackclub.com/conduct`,
       });
     } catch (err) {
       console.error("profanity dm error:", err.message);
