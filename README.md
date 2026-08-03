@@ -8,7 +8,7 @@ QuackX is a Slack bot built for Stardance / Hack Club that lets users interact w
 - `/quackx-ping` — check bot latency
 - `/quackx-joke` — fetch a random joke
 - `/quackx-catfact` — fetch a cat fact
-- `quack <message>` — chat with an AI (e.g. "quack hello!") in a threaded conversation; keep replying in that thread to continue the chat without repeating "quack"
+- `@quackx <message>` — mention @quackx to chat with an AI (e.g. "@quackx hello!") in a threaded conversation; keep replying in that thread to continue the chat
 - `/quackx-news` — latest headlines by topic (business, entertainment, general, health, science, sports, technology; no topic picks a random category)
 - `/quackx-weather` — weather for a city
 
@@ -20,7 +20,7 @@ QuackX is a Slack bot built for Stardance / Hack Club that lets users interact w
   - `SLACK_APP_TOKEN`
   - Socket Mode enabled
   - Slash commands configured
-- AI API key — the `quack <message>` chat uses an OpenAI-compatible endpoint, by default Groq:
+- AI API key — the `@quackx <message>` chat uses an OpenAI-compatible endpoint, by default Groq:
   - `GROQ_API_KEY` (primary) or `OPENAI_API_KEY` (fallback)
   - `AI_MODEL` (default `llama3-8b-8192`)
   - `AI_BASE_URL` (default `https://api.groq.com/openai/v1`)
