@@ -1,6 +1,6 @@
 # QuackX
 
-QuackX is a Slack bot built for Stardance / Hack Club that lets users interact with fun utilities and a local AI model from Slack slash commands.
+QuackX is a Slack bot built for Stardance / Hack Club that lets users interact with fun utilities and an AI from Slack slash commands.
 
 ## Features
 
@@ -20,7 +20,11 @@ QuackX is a Slack bot built for Stardance / Hack Club that lets users interact w
   - `SLACK_APP_TOKEN`
   - Socket Mode enabled
   - Slash commands configured
-- Local Ollama server running and accessible at `LOCAL_MODEL_URL`
+- AI API key — the `quack <message>` chat uses an OpenAI-compatible endpoint, by default Groq:
+  - `GROQ_API_KEY` (primary) or `OPENAI_API_KEY` (fallback)
+  - `AI_MODEL` (default `llama3-8b-8192`)
+  - `AI_BASE_URL` (default `https://api.groq.com/openai/v1`)
+  - Get a free Groq key at https://console.groq.com/keys
 
 ## Setup
 

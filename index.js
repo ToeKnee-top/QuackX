@@ -189,7 +189,7 @@ async function chatWithAI(userContent) {
       }
     );
     const reply = response.data?.choices?.[0]?.message?.content;
-    if (!reply) throw new Error("No content returned from OpenAI.");
+    if (!reply) throw new Error("AI returned an empty response.");
     return reply;
   } catch (err) {
     console.error("chat error", err?.response?.data || err.message || err);
