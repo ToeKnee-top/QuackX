@@ -8,7 +8,7 @@ const cheerio = require("cheerio");
 const DEVLOG_CHANNEL = process.env.DEVLOG_CHANNEL || "C01504DCLVD";
 const cooldown = new Map();
 // Tracks the threads where QuackX is doing AI chat, so replies inside them
-// continue the conversation without needing the `quack` prefix again.
+// continue the conversation without needing to mention @quackx again.
 const aiThreads = new Set();
 const AI_API_KEY = process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY;
 const AI_MODEL = process.env.AI_MODEL || "llama3-8b-8192";
@@ -60,7 +60,8 @@ app.command("/quackx-help", async ({ ack, respond }) => {
 /quackx-joke — get a joke
 /quackx-catfact — get a cat fact
 /quackx-ping — check bot latency
-quack <message> — chat with the AI in a thread (e.g. "quack hello"); keep replying in that thread to keep talking, no "quack" needed
+@quackx <message> — chat with the AI in a thread (e.g. "@quackx hello"); keep replying in that thread to keep talking, no mention needed
+quack @user <message> — send that user a message
 /quackx-news — latest headlines by topic (e.g. /quackx-news technology; no topic = random category)
 /quackx-weather — weather for a city (e.g. /quackx-weather Houston)
 /quackx-help — show this help message`,
@@ -324,34 +325,41 @@ app.message(async ({ message, client }) => {
     }
   }
 
-  // ── DM Relay & AI Chat (quack ...) ────────────
-  // Replies inside an existing QuackX AI thread keep chatting automatically,
-  // no `quack` prefix needed — like a proper agent conversation.
+  // ── DM Relay & AI Chat ─────────────────────────
+  // The DM relay is `quack @user message`: it delivers a quack to that user,
+  // no @quackx mention needed. The AI chat is triggered by `@quackx <message>`,
+  // and replies inside an existing QuackX AI thread keep chatting automatically,
+  // no mention needed — like a proper agent conversation.
+  const BOT_USER_ID = "U0BCH8TDLJG";
+  const botMention = message.text.match(/^\s*<@U0BCH8TDLJG>\s*/i);
   const inAiThread = message.thread_ts && aiThreads.has(message.thread_ts);
 
-  if (/^quack(\s|$)/.test(text) || inAiThread) {
-    if (!inAiThread) {
-      const relayMatch = text.match(/^quack <@(\w+)> (.+)/);
-      if (relayMatch) {
-        const targetUser = relayMatch[1];
-        const msg = relayMatch[2];
-        const time = new Date().toLocaleString();
+  // DM relay: `quack @user message`. Parsed from the ORIGINAL-case text so the
+  // target's Slack user id (U02ABC...) and the message keep their real case.
+  const relayMatch = message.text.match(/^\s*quack\s+<@(\w+)>\s+(.+)/i);
+  if (relayMatch && !inAiThread) {
+    const targetUser = relayMatch[1];
+    const msg = relayMatch[2];
+    const time = new Date().toLocaleString();
 
-        try {
-          await client.chat.postMessage({
-            channel: targetUser,
-            text: `🦆 You got quacked!\nFrom: <@${sender}>\nTime: ${time}\nMessage: ${msg} \n Type quack @someone message to continue the relay!`,
-          });
-        } catch (err) {
-          console.error("quack relay error:", err.message);
-        }
-        return;
-      }
+    try {
+      await client.chat.postMessage({
+        channel: targetUser,
+        text: `🦆 You got quacked!\nFrom: <@${sender}>\nTime: ${time}\nMessage: ${msg} \n Type quack @someone message to continue the relay!`,
+      });
+    } catch (err) {
+      console.error("quack relay error:", err.message);
     }
+    return;
+  }
 
-    // `quack <message>` (or a message inside an existing AI thread) goes to the AI.
-    // A fresh `quack ...` starts a thread so the conversation can continue there.
-    const prompt = message.text.replace(/^quack\s*/i, "").trim() || "Hi!";
+  if (botMention || inAiThread) {
+    // Rest of the message after the bot mention (whole message if in an AI thread).
+    let rest = message.text.replace(/^\s*<@U0BCH8TDLJG>\s*/i, "").trim();
+
+    // Everything after an @quackx mention (or a message inside an existing AI
+    // thread) goes to the AI. A fresh mention starts a thread for the convo.
+    const prompt = rest || "Hi!";
     const threadTs = inAiThread ? message.thread_ts : message.ts;
     if (!inAiThread) aiThreads.add(message.ts);
     try {
