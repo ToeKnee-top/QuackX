@@ -332,7 +332,27 @@ app.message(async ({ message, client }) => {
   // no mention needed — like a proper agent conversation.
   const BOT_USER_ID = "U0BCH8TDLJG";
   const botMention = message.text.match(/^\s*<@U0BCH8TDLJG>\s*/i);
-  const inAiThread = message.thread_ts && aiThreads.has(message.thread_ts);
+  // A message counts as "inside an AI conversation" when it's a reply in a
+  // thread whose root message @mentions QuackX. We check the in-memory Set
+  // first (fast), and fall back to inspecting the thread's root message via
+  // the API so replies keep working even after a bot restart wiped the Set.
+  let inAiThread = message.thread_ts && aiThreads.has(message.thread_ts);
+  if (!inAiThread && message.thread_ts) {
+    try {
+      const res = await client.conversations.replies({
+        channel: message.channel,
+        ts: message.thread_ts,
+        limit: 1,
+      });
+      const root = res.messages && res.messages[0];
+      if (root && root.text && root.text.includes(`<@${BOT_USER_ID}>`)) {
+        aiThreads.add(message.thread_ts);
+        inAiThread = true;
+      }
+    } catch (err) {
+      console.error("ai thread lookup error:", err.message || err);
+    }
+  }
 
   // DM relay: `quack @user message`. Parsed from the ORIGINAL-case text so the
   // target's Slack user id (U02ABC...) and the message keep their real case.
