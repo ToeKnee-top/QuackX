@@ -322,7 +322,7 @@ app.message(async ({ message, client }) => {
   }
 
   // ── DM Relay & AI Chat (quack ...) ────────────
-  if (text.startsWith("quack")) {
+  if (/^quack(\s|$)/.test(text)) {
     const relayMatch = text.match(/^quack <@(\w+)> (.+)/);
     if (relayMatch) {
       const targetUser = relayMatch[1];
