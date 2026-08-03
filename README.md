@@ -9,6 +9,7 @@ QuackX is a Slack bot built for Stardance / Hack Club that lets users interact w
 - `/quackx-joke` — fetch a random joke
 - `/quackx-catfact` — fetch a cat fact
 - `@quackx <message>` — mention @quackx to chat with an AI (e.g. "@quackx hello!") in a threaded conversation; keep replying in that thread to continue the chat
+- `quack @user <message>` — send a message to that user (e.g. "quack @olive hi!")
 - `/quackx-news` — latest headlines by topic (business, entertainment, general, health, science, sports, technology; no topic picks a random category)
 - `/quackx-weather` — weather for a city
 

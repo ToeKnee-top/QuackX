@@ -60,7 +60,8 @@ app.command("/quackx-help", async ({ ack, respond }) => {
 /quackx-joke — get a joke
 /quackx-catfact — get a cat fact
 /quackx-ping — check bot latency
-@quackx <message> — chat with the AI in a thread (e.g. "quack hello"); keep replying in that thread to keep talking, no mention needed
+@quackx <message> — chat with the AI in a thread (e.g. "@quackx hello"); keep replying in that thread to keep talking, no mention needed
+quack @user <message> — send that user a message
 /quackx-news — latest headlines by topic (e.g. /quackx-news technology; no topic = random category)
 /quackx-weather — weather for a city (e.g. /quackx-weather Houston)
 /quackx-help — show this help message`,
@@ -324,36 +325,37 @@ app.message(async ({ message, client }) => {
     }
   }
 
-  // ── DM Relay & AI Chat (mention @quackx ...) ──
-  // QuackX answers when it's mentioned (@quackx <message>). Replies inside an
-  // existing QuackX AI thread keep chatting automatically, no mention needed —
-  // like a proper agent conversation.
+  // ── DM Relay & AI Chat ─────────────────────────
+  // The DM relay is `quack @user message`: it delivers a quack to that user,
+  // no @quackx mention needed. The AI chat is triggered by `@quackx <message>`,
+  // and replies inside an existing QuackX AI thread keep chatting automatically,
+  // no mention needed — like a proper agent conversation.
   const BOT_USER_ID = "U0BCH8TDLJG";
   const botMention = message.text.match(/^\s*<@U0BCH8TDLJG>\s*/i);
   const inAiThread = message.thread_ts && aiThreads.has(message.thread_ts);
 
+  // DM relay: `quack @user message`. Parsed from the ORIGINAL-case text so the
+  // target's Slack user id (U02ABC...) and the message keep their real case.
+  const relayMatch = message.text.match(/^\s*quack\s+<@(\w+)>\s+(.+)/i);
+  if (relayMatch && !inAiThread) {
+    const targetUser = relayMatch[1];
+    const msg = relayMatch[2];
+    const time = new Date().toLocaleString();
+
+    try {
+      await client.chat.postMessage({
+        channel: targetUser,
+        text: `🦆 You got quacked!\nFrom: <@${sender}>\nTime: ${time}\nMessage: ${msg} \n Type quack @someone message to continue the relay!`,
+      });
+    } catch (err) {
+      console.error("quack relay error:", err.message);
+    }
+    return;
+  }
+
   if (botMention || inAiThread) {
     // Rest of the message after the bot mention (whole message if in an AI thread).
     let rest = message.text.replace(/^\s*<@U0BCH8TDLJG>\s*/i, "").trim();
-
-    if (!inAiThread) {
-      const relayMatch = rest.match(/^<@(\w+)>\s+(.+)/);
-      if (relayMatch) {
-        const targetUser = relayMatch[1];
-        const msg = relayMatch[2];
-        const time = new Date().toLocaleString();
-
-        try {
-          await client.chat.postMessage({
-            channel: targetUser,
-            text: `🦆 You got quacked!\nFrom: <@${sender}>\nTime: ${time}\nMessage: ${msg} \n Type @quackx @someone message to continue the relay!`,
-          });
-        } catch (err) {
-          console.error("quack relay error:", err.message);
-        }
-        return;
-      }
-    }
 
     // Everything after an @quackx mention (or a message inside an existing AI
     // thread) goes to the AI. A fresh mention starts a thread for the convo.
