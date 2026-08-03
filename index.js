@@ -7,6 +7,9 @@ const cheerio = require("cheerio");
 
 const DEVLOG_CHANNEL = process.env.DEVLOG_CHANNEL || "C01504DCLVD";
 const cooldown = new Map();
+// Tracks the threads where QuackX is doing AI chat, so replies inside them
+// continue the conversation without needing the `quack` prefix again.
+const aiThreads = new Set();
 const AI_API_KEY = process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY;
 const AI_MODEL = process.env.AI_MODEL || "llama3-8b-8192";
 const AI_BASE_URL = process.env.AI_BASE_URL || "https://api.groq.com/openai/v1";
@@ -57,7 +60,7 @@ app.command("/quackx-help", async ({ ack, respond }) => {
 /quackx-joke — get a joke
 /quackx-catfact — get a cat fact
 /quackx-ping — check bot latency
-quack <message> — chat with the AI (e.g. "quack hello!")
+quack <message> — chat with the AI in a thread (e.g. "quack hello"); keep replying in that thread to keep talking, no "quack" needed
 /quackx-news — latest headlines by topic (e.g. /quackx-news technology; no topic = random category)
 /quackx-weather — weather for a city (e.g. /quackx-weather Houston)
 /quackx-help — show this help message`,
@@ -322,32 +325,47 @@ app.message(async ({ message, client }) => {
   }
 
   // ── DM Relay & AI Chat (quack ...) ────────────
-  if (/^quack(\s|$)/.test(text)) {
-    const relayMatch = text.match(/^quack <@(\w+)> (.+)/);
-    if (relayMatch) {
-      const targetUser = relayMatch[1];
-      const msg = relayMatch[2];
-      const time = new Date().toLocaleString();
+  // Replies inside an existing QuackX AI thread keep chatting automatically,
+  // no `quack` prefix needed — like a proper agent conversation.
+  const inAiThread = message.thread_ts && aiThreads.has(message.thread_ts);
 
-      try {
-        await client.chat.postMessage({
-          channel: targetUser,
-          text: `🦆 You got quacked!\nFrom: <@${sender}>\nTime: ${time}\nMessage: ${msg} \n Type quack @someone message to continue the relay!`,
-        });
-      } catch (err) {
-        console.error("quack relay error:", err.message);
-      }
-    } else {
-      // `quack <message>` with no @mention relays the message to the AI.
-      const prompt = message.text.replace(/^quack\s*/i, "").trim() || "Hi!";
-      try {
-        const reply = await chatWithAI(prompt);
-        await client.chat.postMessage({ channel: message.channel, text: reply });
-      } catch (err) {
-        console.error("quack ai chat error:", err.message || err);
+  if (/^quack(\s|$)/.test(text) || inAiThread) {
+    if (!inAiThread) {
+      const relayMatch = text.match(/^quack <@(\w+)> (.+)/);
+      if (relayMatch) {
+        const targetUser = relayMatch[1];
+        const msg = relayMatch[2];
+        const time = new Date().toLocaleString();
+
+        try {
+          await client.chat.postMessage({
+            channel: targetUser,
+            text: `🦆 You got quacked!\nFrom: <@${sender}>\nTime: ${time}\nMessage: ${msg} \n Type quack @someone message to continue the relay!`,
+          });
+        } catch (err) {
+          console.error("quack relay error:", err.message);
+        }
+        return;
       }
     }
+
+    // `quack <message>` (or a message inside an existing AI thread) goes to the AI.
+    // A fresh `quack ...` starts a thread so the conversation can continue there.
+    const prompt = message.text.replace(/^quack\s*/i, "").trim() || "Hi!";
+    const threadTs = inAiThread ? message.thread_ts : message.ts;
+    if (!inAiThread) aiThreads.add(message.ts);
+    try {
+      const reply = await chatWithAI(prompt);
+      await client.chat.postMessage({
+        channel: message.channel,
+        thread_ts: threadTs,
+        text: reply,
+      });
+    } catch (err) {
+      console.error("quack ai chat error:", err.message || err);
+    }
   }
+
 
   // ── Devlog Detection ───────────────────────────
   const url = extractStardanceLink(text);
