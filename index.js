@@ -7,9 +7,22 @@ const cheerio = require("cheerio");
 
 const DEVLOG_CHANNEL = process.env.DEVLOG_CHANNEL || "C01504DCLVD";
 const cooldown = new Map();
+// Tracks the threads where QuackX is doing AI chat, so replies inside them
+// continue the conversation without needing to mention @quackx again.
+const aiThreads = new Set();
 const AI_API_KEY = process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY;
 const AI_MODEL = process.env.AI_MODEL || "llama3-8b-8192";
 const AI_BASE_URL = process.env.AI_BASE_URL || "https://api.groq.com/openai/v1";
+
+const NEWS_CATEGORIES = [
+  "business",
+  "entertainment",
+  "general",
+  "health",
+  "science",
+  "sports",
+  "technology",
+];
 
 const requiredEnv = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"];
 const missingEnv = requiredEnv.filter((key) => !process.env[key]);
@@ -47,8 +60,9 @@ app.command("/quackx-help", async ({ ack, respond }) => {
 /quackx-joke — get a joke
 /quackx-catfact — get a cat fact
 /quackx-ping — check bot latency
-/quackx-chat — chat with AI (free via Groq, e.g. /quackx-chat Hi)
-/quackx-news — latest news by topic (e.g. /quackx-news technology)
+@quackx <message> — chat with the AI in a thread (e.g. "@quackx hello"); keep replying in that thread to keep talking, no mention needed
+quack @user <message> — send that user a message
+/quackx-news — latest headlines by topic (e.g. /quackx-news technology; no topic = random category)
 /quackx-weather — weather for a city (e.g. /quackx-weather Houston)
 /quackx-help — show this help message`,
   });
@@ -74,8 +88,27 @@ app.command("/quackx-joke", async ({ ack, respond }) => {
 
 app.command("/quackx-news", async ({ command, ack, respond }) => {
   await ack();
+
+  const raw = (command.text || "").trim();
+  let topic = raw.toLowerCase();
+  let note = "";
+
+  if (!raw) {
+    // No topic given: surprise us with a random category for some variety.
+    topic = NEWS_CATEGORIES[Math.floor(Math.random() * NEWS_CATEGORIES.length)];
+  } else if (!NEWS_CATEGORIES.includes(topic)) {
+    // Not a valid NewsAPI category: fall back to a random one instead of failing.
+    note = `"${raw}" isn't a category, so here's a random one: `;
+    topic = NEWS_CATEGORIES[Math.floor(Math.random() * NEWS_CATEGORIES.length)];
+  }
+
+  if (!process.env.NEWS_API_KEY) {
+    return await respond(
+      "NEWS_API_KEY is not set. Get a free key at https://newsapi.org/register"
+    );
+  }
+
   try {
-    const topic = command.text || "technology";
     const url = `https://newsapi.org/v2/top-headlines?country=us&category=${encodeURIComponent(topic)}&apiKey=${process.env.NEWS_API_KEY}`;
     const { data } = await axios.get(url);
 
@@ -88,7 +121,7 @@ app.command("/quackx-news", async ({ command, ack, respond }) => {
       .map((a, i) => `*${i + 1}. ${a.title}*\n${a.url}`)
       .join("\n\n");
 
-    await respond(`📰 *Top News for:* _${topic}_\n\n${formatted}`);
+    await respond(`📰 *Top News* ${note}_${topic}_\n\n${formatted}`);
   } catch (err) {
     console.error("news error", err);
     await respond("Sorry, I couldn't fetch the news right now.");
@@ -101,6 +134,11 @@ app.command("/quackx-weather", async ({ command, ack, respond }) => {
     const city = (command.text || "").trim();
     if (!city) {
       return await respond("Please provide a city name, like:\n\`/quackx-weather Houston\`");
+    }
+    if (!process.env.WEATHER_API_KEY) {
+      return await respond(
+        "WEATHER_API_KEY is not set. Get a free key at https://openweathermap.org/api"
+      );
     }
 
     const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&units=imperial&appid=${process.env.WEATHER_API_KEY}`;
@@ -127,12 +165,11 @@ app.command("/quackx-weather", async ({ command, ack, respond }) => {
   }
 });
 
-app.command("/quackx-chat", async ({ command, ack, respond }) => {
-  await ack();
-  const userContent = (command.text || "Hi. Can you update me on news and weather?").trim();
+// ─── Helpers ────────────────────────────────────────────
 
+async function chatWithAI(userContent) {
   if (!AI_API_KEY) {
-    return await respond("GROQ_API_KEY is not set. Get a free key at https://console.groq.com/keys");
+    return "GROQ_API_KEY is not set. Get a free key at https://console.groq.com/keys";
   }
 
   try {
@@ -153,17 +190,13 @@ app.command("/quackx-chat", async ({ command, ack, respond }) => {
       }
     );
     const reply = response.data?.choices?.[0]?.message?.content;
-    if (!reply) throw new Error("No content returned from OpenAI.");
-    await respond({ text: reply });
+    if (!reply) throw new Error("AI returned an empty response.");
+    return reply;
   } catch (err) {
     console.error("chat error", err?.response?.data || err.message || err);
-    await respond({
-      text: "Sorry, I couldn't get a response. Check your API key and try again.",
-    });
+    return "Sorry, I couldn't get a response. Check your API key and try again.";
   }
-});
-
-// ─── Helpers ────────────────────────────────────────────
+}
 
 function canPost(user) {
   const now = Date.now();
@@ -175,11 +208,14 @@ function canPost(user) {
 }
 
 function extractStardanceLink(text) {
-  const match = text.match(/https?:\/\/stardance\.hackclub\.com\/[^\s]+/);
+  // Matches both bare links (https://stardance.hackclub.com/...) and styled
+  // Slack links (<https://stardance.hackclub.com/...|Label>). Stopping the
+  // match at `>` handles the styled-link terminator, then we strip any
+  // trailing `|Label` suffix and stray punctuation.
+  const match = text.match(/https?:\/\/stardance\.hackclub\.com\/[^\s>]+/);
   if (!match) return null;
   let url = match[0];
-  // Strip trailing Slack formatting chars
-  url = url.replace(/[>\)|]+$/, '');
+  url = url.replace(/\|.*$/, "").replace(/[>\)\]]+$/, "");
   return url;
 }
 
@@ -289,24 +325,55 @@ app.message(async ({ message, client }) => {
     }
   }
 
-  // ── DM Relay (quack @user message) ─────────────
-  if (text.startsWith("quack")) {
-    const match = text.match(/^quack <@(\w+)> (.+)/);
-    if (match) {
-      const targetUser = match[1];
-      const msg = match[2];
-      const time = new Date().toLocaleString();
+  // ── DM Relay & AI Chat ─────────────────────────
+  // The DM relay is `quack @user message`: it delivers a quack to that user,
+  // no @quackx mention needed. The AI chat is triggered by `@quackx <message>`,
+  // and replies inside an existing QuackX AI thread keep chatting automatically,
+  // no mention needed — like a proper agent conversation.
+  const BOT_USER_ID = "U0BCH8TDLJG";
+  const botMention = message.text.match(/^\s*<@U0BCH8TDLJG>\s*/i);
+  const inAiThread = message.thread_ts && aiThreads.has(message.thread_ts);
 
-      try {
-        await client.chat.postMessage({
-          channel: targetUser,
-          text: `🦆 You got quacked!\nFrom: <@${sender}>\nTime: ${time}\nMessage: ${msg} \n Type quack @someone message to continue the relay!`,
-        });
-      } catch (err) {
-        console.error("quack relay error:", err.message);
-      }
+  // DM relay: `quack @user message`. Parsed from the ORIGINAL-case text so the
+  // target's Slack user id (U02ABC...) and the message keep their real case.
+  const relayMatch = message.text.match(/^\s*quack\s+<@(\w+)>\s+(.+)/i);
+  if (relayMatch && !inAiThread) {
+    const targetUser = relayMatch[1];
+    const msg = relayMatch[2];
+    const time = new Date().toLocaleString();
+
+    try {
+      await client.chat.postMessage({
+        channel: targetUser,
+        text: `🦆 You got quacked!\nFrom: <@${sender}>\nTime: ${time}\nMessage: ${msg} \n Type quack @someone message to continue the relay!`,
+      });
+    } catch (err) {
+      console.error("quack relay error:", err.message);
+    }
+    return;
+  }
+
+  if (botMention || inAiThread) {
+    // Rest of the message after the bot mention (whole message if in an AI thread).
+    let rest = message.text.replace(/^\s*<@U0BCH8TDLJG>\s*/i, "").trim();
+
+    // Everything after an @quackx mention (or a message inside an existing AI
+    // thread) goes to the AI. A fresh mention starts a thread for the convo.
+    const prompt = rest || "Hi!";
+    const threadTs = inAiThread ? message.thread_ts : message.ts;
+    if (!inAiThread) aiThreads.add(message.ts);
+    try {
+      const reply = await chatWithAI(prompt);
+      await client.chat.postMessage({
+        channel: message.channel,
+        thread_ts: threadTs,
+        text: reply,
+      });
+    } catch (err) {
+      console.error("quack ai chat error:", err.message || err);
     }
   }
+
 
   // ── Devlog Detection ───────────────────────────
   const url = extractStardanceLink(text);
