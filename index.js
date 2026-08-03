@@ -331,7 +331,10 @@ app.message(async ({ message, client }) => {
 
   if (/^quack(\s|$)/.test(text) || inAiThread) {
     if (!inAiThread) {
-      const relayMatch = text.match(/^quack <@(\w+)> (.+)/);
+      // Match against the ORIGINAL message text (not the lowercased `text`)
+      // so the target's Slack user id keeps its real case (U02ABC... not u02abc...)
+      // and the relayed message isn't forced to lowercase.
+      const relayMatch = message.text.match(/^quack\s*<@(\w+)>\s+(.+)/i);
       if (relayMatch) {
         const targetUser = relayMatch[1];
         const msg = relayMatch[2];
