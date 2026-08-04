@@ -299,32 +299,6 @@ function formatDevlogBlocks(user, url, devlog, parsed) {
 }
 
 // ─── Main Message Listener ──────────────────────────────
-
-const badWords = ["fuck", "shit", "bitch", "ass", "retard", "dumb", "dumbass"];
-
-app.message(async ({ message, client }) => {
-  if (!message.text || message.subtype === "bot_message") return;
-
-  const text = message.text.toLowerCase();
-  const sender = message.user;
-
-  // ── Profanity Filter ───────────────────────────
-  const matches = [...text.matchAll(/\b(fuck|shit|bitch|ass|retard|dumb|dumbass)\b/g)];
-  if (matches.length > 0) {
-    try {
-      const curses = [];
-      matches.forEach((arr) => {
-        curses.push(arr[0]);
-      })
-      await client.chat.postMessage({
-        channel: sender,
-        text: `hey, 👀 just a heads up—try to avoid that word here${curses.length ? `: ${[...new Set(curses)].join(", ")}` : ""}. It would be greatly appreciated by the community.👌\n👉 https://hackclub.com/conduct`,
-      });
-    } catch (err) {
-      console.error("profanity dm error:", err.message);
-    }
-  }
-
   // ── DM Relay & AI Chat ─────────────────────────
   // The DM relay is `quack @user message`: it delivers a quack to that user,
   // no @quackx mention needed. The AI chat is triggered by `@quackx <message>`,
