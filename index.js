@@ -7,8 +7,8 @@ const cheerio = require("cheerio");
 
 const DEVLOG_CHANNEL = process.env.DEVLOG_CHANNEL || "C01504DCLVD";
 const cooldown = new Map();
-// Tracks the threads where QuackX is doing AI chat, so replies inside them
-// continue the conversation without needing to mention @quackx again.
+// Tracks the threads where Forkie is doing AI chat, so replies inside them
+// continue the conversation without needing to mention @forkie again.
 const aiThreads = new Set();
 const AI_API_KEY = process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY;
 const AI_MODEL = process.env.AI_MODEL || "llama3-8b-8192";
@@ -42,7 +42,7 @@ console.log("Using AI model:", AI_MODEL, "at", AI_BASE_URL);
 
 // ─── Slash Commands ─────────────────────────────────────
 
-app.command("/quackx-catfact", async ({ ack, respond }) => {
+app.command("/forkie-catfact", async ({ ack, respond }) => {
   await ack();
   try {
     const response = await axios.get("https://catfact.ninja/fact");
@@ -53,29 +53,29 @@ app.command("/quackx-catfact", async ({ ack, respond }) => {
   }
 });
 
-app.command("/quackx-help", async ({ ack, respond }) => {
+app.command("/forkie-help", async ({ ack, respond }) => {
   await ack();
   await respond({
     text: `Available Commands:
-/quackx-joke — get a joke
-/quackx-catfact — get a cat fact
-/quackx-ping — check bot latency
-@quackx <message> — chat with the AI in a thread (e.g. "@quackx hello"); keep replying in that thread to keep talking, no mention needed
+/forkie-joke — get a joke
+/forkie-catfact — get a cat fact
+/forkie-ping — check bot latency
+@forkie <message> — chat with the AI in a thread (e.g. "@forkie hello"); keep replying in that thread to keep talking, no mention needed
 quack @user <message> — send that user a message
-/quackx-news — latest headlines by topic (e.g. /quackx-news technology; no topic = random category)
-/quackx-weather — weather for a city (e.g. /quackx-weather Houston)
-/quackx-help — show this help message`,
+/forkie-news — latest headlines by topic (e.g. /forkie-news technology; no topic = random category)
+/forkie-weather — weather for a city (e.g. /forkie-weather Houston)
+/forkie-help — show this help message`,
   });
 });
 
-app.command("/quackx-ping", async ({ ack, respond }) => {
+app.command("/forkie-ping", async ({ ack, respond }) => {
   const start = Date.now();
   await ack();
   const latency = Date.now() - start;
   await respond({ text: `🏓 Pong!\nLatency: ${latency}ms` });
 });
 
-app.command("/quackx-joke", async ({ ack, respond }) => {
+app.command("/forkie-joke", async ({ ack, respond }) => {
   await ack();
   try {
     const response = await axios.get("https://official-joke-api.appspot.com/random_joke");
@@ -86,7 +86,7 @@ app.command("/quackx-joke", async ({ ack, respond }) => {
   }
 });
 
-app.command("/quackx-news", async ({ command, ack, respond }) => {
+app.command("/forkie-news", async ({ command, ack, respond }) => {
   await ack();
 
   const raw = (command.text || "").trim();
@@ -128,12 +128,12 @@ app.command("/quackx-news", async ({ command, ack, respond }) => {
   }
 });
 
-app.command("/quackx-weather", async ({ command, ack, respond }) => {
+app.command("/forkie-weather", async ({ command, ack, respond }) => {
   await ack();
   try {
     const city = (command.text || "").trim();
     if (!city) {
-      return await respond("Please provide a city name, like:\n\`/quackx-weather Houston\`");
+      return await respond("Please provide a city name, like:\n\`/forkie-weather Houston\`");
     }
     if (!process.env.WEATHER_API_KEY) {
       return await respond(
@@ -160,7 +160,7 @@ app.command("/quackx-weather", async ({ command, ack, respond }) => {
     console.error("weather error", err);
     await respond(
       "I couldn't fetch the weather. Make sure the city name is valid, like:\n" +
-      "\`/quackx-weather New York\`"
+      "\`/forkie-weather New York\`"
     );
   }
 });
@@ -299,15 +299,21 @@ function formatDevlogBlocks(user, url, devlog, parsed) {
 }
 
 // ─── Main Message Listener ──────────────────────────────
+
+app.message(async ({ message, client }) => {
+  if (!message.text || message.subtype === "bot_message") return;
+  const text = message.text.toLowerCase();
+  const sender = message.user;
+
   // ── DM Relay & AI Chat ─────────────────────────
   // The DM relay is `quack @user message`: it delivers a quack to that user,
-  // no @quackx mention needed. The AI chat is triggered by `@quackx <message>`,
-  // and replies inside an existing QuackX AI thread keep chatting automatically,
+  // no @forkie mention needed. The AI chat is triggered by `@forkie <message>`,
+  // and replies inside an existing Forkie AI thread keep chatting automatically,
   // no mention needed — like a proper agent conversation.
   const BOT_USER_ID = "U0BCH8TDLJG";
   const botMention = message.text.match(/^\s*<@U0BCH8TDLJG>\s*/i);
   // A message counts as "inside an AI conversation" when it's a reply in a
-  // thread whose root message @mentions QuackX. We check the in-memory Set
+  // thread whose root message @mentions Forkie. We check the in-memory Set
   // first (fast), and fall back to inspecting the thread's root message via
   // the API so replies keep working even after a bot restart wiped the Set.
   let inAiThread = message.thread_ts && aiThreads.has(message.thread_ts);
@@ -351,7 +357,7 @@ function formatDevlogBlocks(user, url, devlog, parsed) {
     // Rest of the message after the bot mention (whole message if in an AI thread).
     let rest = message.text.replace(/^\s*<@U0BCH8TDLJG>\s*/i, "").trim();
 
-    // Everything after an @quackx mention (or a message inside an existing AI
+    // Everything after an @forkie mention (or a message inside an existing AI
     // thread) goes to the AI. A fresh mention starts a thread for the convo.
     const prompt = rest || "Hi!";
     const threadTs = inAiThread ? message.thread_ts : message.ts;
@@ -390,5 +396,5 @@ function formatDevlogBlocks(user, url, devlog, parsed) {
 
 (async () => {
   await app.start();
-  console.log("⚡ QuackX is running!");
+  console.log("⚡ Forkie is running!");
 })();
