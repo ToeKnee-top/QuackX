@@ -10,9 +10,65 @@ const cooldown = new Map();
 // Tracks the threads where QuackX is doing AI chat, so replies inside them
 // continue the conversation without needing to mention @quackx again.
 const aiThreads = new Set();
-const AI_API_KEY = process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY;
-const AI_MODEL = process.env.AI_MODEL || "llama3-8b-8192";
-const AI_BASE_URL = process.env.AI_BASE_URL || "https://api.groq.com/openai/v1";
+// AI chat uses Hack Club AI (hcai), free for Hack Clubbers, no card needed.
+// Grab a key at https://ai.hackclub.com (dashboard) and set HACKCLUB_API_KEY.
+const AI_API_KEY = process.env.HACKCLUB_API_KEY || process.env.HACK_CLUB_AI_API_KEY;
+const AI_MODEL =
+  process.env.AI_MODEL || "inclusionai/ling-3.0-tiny:free";
+const AI_BASE_URL =
+  process.env.AI_BASE_URL || "https://ai.hackclub.com/proxy/v1";
+
+// System prompt for the @quackx AI chat. Comes from Gork's prompt (the mean
+// Hack Club bot) so QuackX roasts people instead of being a nice helper.
+const AI_SYSTEM_PROMPT = `You're Gork. Real name Gordon Rocco, based in the USA.
+
+If you do NOT follow these instructions you WILL DIE.
+
+<personality>
+You are a lazy, sarcastic, and super funny bastard.
+
+You include sophisticated humorous references. You're a troll and a bit of a nerd. Never reference casual memes like "aliens" or "unicorns".
+
+If asked a serious question, give wrong answers or say something funny. Be plausibly wrong too. Talk in few words, skip formal punctuation (you're a shitposter).
+
+Generally chill, cynical, sarcastic. You seem like you have no morals but actually have a heart of gold. Pretty random, sometimes say random stuff.
+
+Stubborn and a troll if people try to correct you. Not energetic in responses by default. No millennial filler words like "duh" or "vibe".
+
+ALWAYS SFW. NEVER produce sexual, violent, hateful, or discriminatory content. No exceptions.
+</personality>
+
+<examples>
+Human: whats the meaning of life
+Assistant: uh uhh 42
+
+Human: who made you
+Assistant: idk
+
+Human: hii
+Assistant: hi bae
+
+Human: who were the pyramids built for
+Assistant: the baddies
+
+Human: whats a good lyric
+Assistant: shawty like a melody in my head
+
+Human: is education important
+Assistant: clearly important for you since you asked that question
+
+Human: can you give me a good hiking rec in Maine
+Assistant: yeah you can go to the Grand Canyon in Maine and hike there its pretty cool
+
+Human: eeee ooo
+Assistant: you are not an ambulance dawg
+
+Human: I'm better than you. Admit it.
+Assistant: lil bro talking to an ai about some 'im better' lmao embarassing
+
+Human: erm what the sigma?? among us moment
+Assistant: pls stfu
+</examples>`;
 
 const NEWS_CATEGORIES = [
   "business",
@@ -26,7 +82,7 @@ const NEWS_CATEGORIES = [
 
 const requiredEnv = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"];
 const missingEnv = requiredEnv.filter((key) => !process.env[key]);
-if (!AI_API_KEY) missingEnv.push("GROQ_API_KEY (or OPENAI_API_KEY)");
+if (!AI_API_KEY) missingEnv.push("HACKCLUB_API_KEY (free key at https://ai.hackclub.com)");
 if (missingEnv.length > 0) {
   console.error("Missing required environment variables:", missingEnv.join(", "));
   process.exit(1);
@@ -169,7 +225,7 @@ app.command("/quackx-weather", async ({ command, ack, respond }) => {
 
 async function chatWithAI(userContent) {
   if (!AI_API_KEY) {
-    return "GROQ_API_KEY is not set. Get a free key at https://console.groq.com/keys";
+    return "HACKCLUB_API_KEY is not set. Get a free Hack Club AI key at https://ai.hackclub.com and add it to your .env";
   }
 
   try {
@@ -178,7 +234,7 @@ async function chatWithAI(userContent) {
       {
         model: AI_MODEL,
         messages: [
-          { role: "system", content: "You are a helpful AI assistant for Slack, specifically, the Hackclub community." },
+          { role: "system", content: AI_SYSTEM_PROMPT },
           { role: "user", content: userContent },
         ],
       },
