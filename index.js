@@ -299,6 +299,12 @@ function formatDevlogBlocks(user, url, devlog, parsed) {
 }
 
 // ─── Main Message Listener ──────────────────────────────
+app.message(async ({ message, client }) => {
+  if (!message.text || message.subtype === "bot_message") return;
+
+  const text = message.text.toLowerCase();
+  const sender = message.user;
+
   // ── DM Relay & AI Chat ─────────────────────────
   // The DM relay is `quack @user message`: it delivers a quack to that user,
   // no @quackx mention needed. The AI chat is triggered by `@quackx <message>`,
