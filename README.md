@@ -23,7 +23,7 @@ QuackX is a Slack bot built for Stardance / Hack Club that lets users interact w
   - Slash commands configured
 - AI API key — the `@quackx <message>` chat uses Hack Club AI (hcai), free for Hack Clubbers (no card, no key cost):
   - `HACKCLUB_API_KEY` — grab one free at https://ai.hackclub.com (dashboard)
-  - `AI_MODEL` (default `inclusionai/ling-3.0-tiny:free`)
+  - `AI_MODEL` (default `qwen/qwen3.7-flash`)
   - `AI_BASE_URL` (default `https://ai.hackclub.com/proxy/v1`)
   - The chat uses Gork's prompt, so QuackX roasts people instead of being a helpful assistant.
 

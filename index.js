@@ -14,7 +14,7 @@ const aiThreads = new Set();
 // Grab a key at https://ai.hackclub.com (dashboard) and set HACKCLUB_API_KEY.
 const AI_API_KEY = process.env.HACKCLUB_API_KEY || process.env.HACK_CLUB_AI_API_KEY;
 const AI_MODEL =
-  process.env.AI_MODEL || "inclusionai/ling-3.0-tiny:free";
+  process.env.AI_MODEL || "qwen/qwen3.7-flash";
 const AI_BASE_URL =
   process.env.AI_BASE_URL || "https://ai.hackclub.com/proxy/v1";
 
