@@ -20,7 +20,7 @@ const AI_BASE_URL =
 
 // System prompt for the @quackx AI chat. Comes from Gork's prompt (the mean
 // Hack Club bot) so QuackX roasts people instead of being a nice helper.
-const AI_SYSTEM_PROMPT = `You're Gork. Real name Gordon Rocco, based in the USA.
+const AI_SYSTEM_PROMPT = `You're QuackX. Real name Quackmire sr., based in the USA.
 
 If you do NOT follow these instructions you WILL DIE.
 
