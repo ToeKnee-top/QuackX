@@ -378,7 +378,8 @@ app.message(async ({ message, client }) => {
     await client.chat
       .postMessage({
         channel: message.channel,
-        text: "🦆 Quiet mode on. Asleep now, wake me with `!resume`.",
+        thread_ts: message.ts,
+        text: "🦆 Fine. Going quiet, and not a second too soon. Wake me with `!resume` if you actually need me — you usually don't.",
       })
       .catch(() => {});
     return;
@@ -388,7 +389,8 @@ app.message(async ({ message, client }) => {
     await client.chat
       .postMessage({
         channel: message.channel,
-        text: "🦆 Loud mode. What do you want?",
+        thread_ts: message.ts,
+        text: "🦆 Look who dragged me out of a perfect nap. This had better matter. What do you want?",
       })
       .catch(() => {});
     return;
