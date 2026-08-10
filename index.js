@@ -368,7 +368,9 @@ app.message(async ({ message, client }) => {
   // starts with `##`.
   if (message.text.trimStart().startsWith("##")) return;
 
-  const directCmd = message.text.trim().toLowerCase();
+  // Strip a leading `<@MENTION>` (e.g. `@quackx !stop`) so the command match
+  // below works whether the bot is invoked by mention or plain text.
+  const directCmd = message.text.trim().toLowerCase().replace(/^<@\w+>\s*/, "");
   // The @Bot !Stop Convention: `!stop` silences QuackX in this channel until
   // `!resume` is typed there. Handled before any other logic so it always works.
   if (/^!stop\b/i.test(directCmd)) {
