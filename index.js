@@ -379,7 +379,7 @@ app.message(async ({ message, client }) => {
       .postMessage({
         channel: message.channel,
         thread_ts: message.ts,
-        text: "🦆 Fine. Going quiet, and not a second too soon. Wake me with `!resume` if you actually need me — you usually don't.",
+        text: "🦆 fine, I'll shut up but pipe down loser im sleeping. dont ping me unless you want your ip leaked.",
       })
       .catch(() => {});
     return;
