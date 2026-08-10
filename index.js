@@ -10,6 +10,10 @@ const cooldown = new Map();
 // Tracks the threads where QuackX is doing AI chat, so replies inside them
 // continue the conversation without needing to mention @quackx again.
 const aiThreads = new Set();
+// Channels where QuackX has been told `!stop`. While a channel is in this set
+// the bot stays quiet there until someone types `!resume` to bring it back.
+// Per the Hack Club @Bot !Stop Convention.
+const silencedChannels = new Set();
 // AI chat uses Hack Club AI (hcai), free for Hack Clubbers, no card needed.
 // Grab a key at https://ai.hackclub.com (dashboard) and set HACKCLUB_API_KEY.
 const AI_API_KEY = process.env.HACKCLUB_API_KEY || process.env.HACK_CLUB_AI_API_KEY;
@@ -120,6 +124,7 @@ app.command("/quackx-help", async ({ ack, respond }) => {
 quack @user <message> — send that user a message
 /quackx-news — latest headlines by topic (e.g. /quackx-news technology; no topic = random category)
 /quackx-weather — weather for a city (e.g. /quackx-weather Houston)
+!stop — silence me in this channel (say !resume to wake me up)
 /quackx-help — show this help message`,
   });
 });
@@ -357,6 +362,37 @@ function formatDevlogBlocks(user, url, devlog, parsed) {
 // ─── Main Message Listener ──────────────────────────────
 app.message(async ({ message, client }) => {
   if (!message.text || message.subtype === "bot_message") return;
+
+  // ── Hack Club bot conventions ────────────────────
+  // The Double Hash Convention: never process or respond to a message that
+  // starts with `##`.
+  if (message.text.trimStart().startsWith("##")) return;
+
+  const directCmd = message.text.trim().toLowerCase();
+  // The @Bot !Stop Convention: `!stop` silences QuackX in this channel until
+  // `!resume` is typed there. Handled before any other logic so it always works.
+  if (/^!stop\b/i.test(directCmd)) {
+    silencedChannels.add(message.channel);
+    await client.chat
+      .postMessage({
+        channel: message.channel,
+        text: "🦆 Quiet mode on. Asleep now, wake me with `!resume`.",
+      })
+      .catch(() => {});
+    return;
+  }
+  if (/^!resume\b/i.test(directCmd)) {
+    silencedChannels.delete(message.channel);
+    await client.chat
+      .postMessage({
+        channel: message.channel,
+        text: "🦆 Loud mode. What do you want?",
+      })
+      .catch(() => {});
+    return;
+  }
+  // While silenced in a channel, ignore everything there except the resume above.
+  if (silencedChannels.has(message.channel)) return;
 
   const text = message.text.toLowerCase();
   const sender = message.user;
